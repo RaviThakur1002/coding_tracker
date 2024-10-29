@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { PlusCircle, MinusCircle, RefreshCcw, Trophy, Star, Sun, Moon } from 'lucide-react';
 
 // Assuming this is implemented in your api.js
-import { fetchCodeforcesSubmissions } from '../utils/api';
+import { fetchCodeforcesSubmissions, fetchLeetCodeSubmissions } from '../utils/api';
 
 const CodingTracker = () => {
   const [darkMode, setDarkMode] = useState(() => {
@@ -90,9 +90,34 @@ const CodingTracker = () => {
           const submissionDate = new Date(sub.creationTimeSeconds * 1000).setHours(0, 0, 0, 0);
           return sub.verdict === 'OK' && submissionDate === today;
         }).length;
-
+        // console.log(cfDailyCount)
         // TODO: Integrate actual LeetCode API
-        const lcDailyCount = 0;
+        const data=await fetchLeetCodeSubmissions(friend.platforms.leetcode)
+        // console.log(new Date(data.recentSubmissions[0].timestamp*1000));
+        
+        // console.log(data.recentSubmissions.length);
+        
+        let lcDailyCount = 0;
+        const today_date=new Date();
+
+        // console.log(today_date.getUTCDate());
+        
+        for(let i=0;i<data.recentSubmissions.length;i++){
+          const date=new Date(data.recentSubmissions[i].timestamp*1000)
+          console.log(lcDailyCount);
+          if(
+            date.getUTCFullYear() === today_date.getUTCFullYear() &&
+            date.getUTCMonth() === today_date.getUTCMonth() &&
+            date.getUTCDate() === today_date.getUTCDate()
+          ){
+            lcDailyCount++;
+          }else{
+            break;
+          }
+        }
+
+        
+        
 
         newStats[friend.id] = {
           codeforces: cfDailyCount,
