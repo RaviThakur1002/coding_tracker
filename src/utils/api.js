@@ -1,4 +1,5 @@
 // src/utils/api.js
+
 const API_CACHE = {
   data: new Map(),
   timestamps: new Map()
@@ -63,15 +64,20 @@ class APIQueue {
     try {
       const response = await fetch(request.url);
       
-      if (response.status === 429) {
-        RATE_LIMIT.backoffTime *= 2;
-        await new Promise(resolve => setTimeout(resolve, RATE_LIMIT.backoffTime));
-        return this.executeRequest(request);
+      if (!response.ok) {
+        if (response.status === 429) {
+          RATE_LIMIT.backoffTime *= 2;
+          await new Promise(resolve => setTimeout(resolve, RATE_LIMIT.backoffTime));
+          return this.executeRequest(request);
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
       
       RATE_LIMIT.backoffTime = 1000;
-      return response.json();
+      const data = await response.json();
+      return data;
     } catch (error) {
+      console.error('API request failed:', error);
       throw error;
     }
   }
@@ -80,6 +86,10 @@ class APIQueue {
 const apiQueue = new APIQueue();
 
 export const fetchCodeforcesSubmissions = async (handle) => {
+  if (!handle) {
+    throw new Error('Codeforces handle is required');
+  }
+
   const cacheKey = `codeforces-${handle}`;
   const now = Date.now();
   const cachedData = API_CACHE.data.get(cacheKey);
@@ -91,8 +101,12 @@ export const fetchCodeforcesSubmissions = async (handle) => {
 
   try {
     const data = await apiQueue.add({
-      url: `https://codeforces.com/api/user.status?handle=${handle}`
+      url: `https://codeforces.com/api/user.status?handle=${encodeURIComponent(handle)}`
     });
+
+    if (data.status === 'FAILED') {
+      throw new Error(data.comment || 'Codeforces API request failed');
+    }
 
     API_CACHE.data.set(cacheKey, data);
     API_CACHE.timestamps.set(cacheKey, now);
@@ -100,6 +114,66 @@ export const fetchCodeforcesSubmissions = async (handle) => {
     return data;
   } catch (error) {
     console.error(`Error fetching Codeforces data for ${handle}:`, error);
-    return cachedData || { result: [] };
+    if (cachedData) {
+      return cachedData;
+    }
+    return { result: [] };
   }
+};
+
+export const fetchLeetCodeSubmissions = async (handle) => {
+  if (!handle) {
+    throw new Error('LeetCode handle is required');
+  }
+
+  const cacheKey = `leetcode-${handle}`;
+  const now = Date.now();
+  const cachedData = API_CACHE.data.get(cacheKey);
+  const cachedTimestamp = API_CACHE.timestamps.get(cacheKey);
+
+  if (cachedData && cachedTimestamp && now - cachedTimestamp < 300000) {
+    return cachedData;
+  }
+
+  try {
+    const data = await apiQueue.add({
+      url: `https://leetcode-api-faisalshohag.vercel.app/${encodeURIComponent(handle)}`
+    });
+
+    // Validate the response has the expected structure
+    if (!data || !Array.isArray(data.recentSubmissions)) {
+      throw new Error('Invalid LeetCode API response format');
+    }
+
+    API_CACHE.data.set(cacheKey, data);
+    API_CACHE.timestamps.set(cacheKey, now);
+
+    return data;
+  } catch (error) {
+    console.error(`Error fetching LeetCode data for ${handle}:`, error);
+    if (cachedData) {
+      return cachedData;
+    }
+    return { recentSubmissions: [] };
+  }
+};
+
+// Helper function to get today's submissions count
+export const getSubmissionsCount = (submissions, platform = 'codeforces') => {
+  const today = new Date().setHours(0, 0, 0, 0);
+
+  if (platform === 'codeforces') {
+    return submissions.filter(sub => {
+      const submissionDate = new Date(sub.creationTimeSeconds * 1000).setHours(0, 0, 0, 0);
+      return sub.verdict === 'OK' && submissionDate === today;
+    }).length;
+  } else if (platform === 'leetcode') {
+    return submissions.filter(sub => {
+      const timestamp = sub.timestamp.length <= 10 ? sub.timestamp * 1000 : sub.timestamp;
+      const submissionDate = new Date(parseInt(timestamp)).setHours(0, 0, 0, 0);
+      return sub.statusDisplay === 'Accepted' && submissionDate === today;
+    }).length;
+  }
+
+  return 0;
 };
