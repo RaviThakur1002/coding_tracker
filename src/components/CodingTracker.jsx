@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PlusCircle, MinusCircle, RefreshCcw, Trophy, Star, ExternalLink } from 'lucide-react';
+import { PlusCircle, MinusCircle, RefreshCcw, Trophy, Star } from 'lucide-react';
 import { fetchCodeforcesSubmissions } from '../utils/api';
 
 const CodingTracker = () => {
@@ -17,137 +17,46 @@ const CodingTracker = () => {
   });
   const [stats, setStats] = useState({});
   const [error, setError] = useState('');
-  const [validationErrors, setValidationErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [showWinnerAnimation, setShowWinnerAnimation] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshKey, setRefreshKey] = useState(0); // For refresh animation
 
+  // Save friends to localStorage whenever they change
   useEffect(() => {
     localStorage.setItem('codingFriends', JSON.stringify(friends));
   }, [friends]);
 
-  // Function to validate Codeforces username
-  const validateCodeforcesUsername = async (username) => {
-    try {
-      const response = await fetch(`https://codeforces.com/api/user.info?handles=${username}`);
-      const data = await response.json();
-      return data.status === 'OK';
-    } catch {
-      return false;
-    }
-  };
-
-  // Function to validate LeetCode username
-  const validateLeetCodeUsername = async (username) => {
-    try {
-      const response = await fetch(`https://leetcode.com/graphql`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: `
-            query userProfile($username: String!) {
-              matchedUser(username: $username) {
-                username
-              }
-            }
-          `,
-          variables: { username }
-        })
-      });
-      const data = await response.json();
-      return !!data.data?.matchedUser;
-    } catch {
-      return false;
-    }
-  };
-
-  const handleAddFriend = async () => {
+  const handleAddFriend = () => {
     if (!newFriend.name || !newFriend.platforms.codeforces || !newFriend.platforms.leetcode) {
       setError('Please fill in all fields');
       return;
     }
 
-    setIsLoading(true);
-    setError('');
-    setValidationErrors({});
-
-    try {
-      const [isValidCF, isValidLC] = await Promise.all([
-        validateCodeforcesUsername(newFriend.platforms.codeforces),
-        validateLeetCodeUsername(newFriend.platforms.leetcode)
-      ]);
-
-      const newValidationErrors = {};
-      if (!isValidCF) newValidationErrors.codeforces = 'Invalid Codeforces username';
-      if (!isValidLC) newValidationErrors.leetcode = 'Invalid LeetCode username';
-
-      if (Object.keys(newValidationErrors).length > 0) {
-        setValidationErrors(newValidationErrors);
-        return;
+    setFriends(prev => [...prev, { ...newFriend, id: Date.now() }]);
+    setNewFriend({
+      name: '',
+      platforms: {
+        codeforces: '',
+        leetcode: ''
       }
-
-      setFriends(prev => [...prev, { ...newFriend, id: Date.now() }]);
-      setNewFriend({
-        name: '',
-        platforms: {
-          codeforces: '',
-          leetcode: ''
-        }
-      });
-    } catch (err) {
-      setError('Error validating usernames');
-    } finally {
-      setIsLoading(false);
-    }
+    });
+    setError('');
   };
 
   const handleRemoveFriend = (friendId) => {
     setFriends(prev => prev.filter(friend => friend.id !== friendId));
   };
 
-  const fetchLeetCodeStats = async (username) => {
-    try {
-      const response = await fetch('https://leetcode.com/graphql', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: `
-            query getUserProfile($username: String!) {
-              matchedUser(username: $username) {
-                submitStats {
-                  acSubmissionNum {
-                    difficulty
-                    count
-                    submissions
-                  }
-                }
-              }
-            }
-          `,
-          variables: { username }
-        })
-      });
-      const data = await response.json();
-      const todayStats = data.data?.matchedUser?.submitStats?.acSubmissionNum || [];
-      return todayStats.reduce((acc, curr) => acc + curr.count, 0);
-    } catch {
-      return 0;
-    }
-  };
-
   const fetchStats = async () => {
     setIsLoading(true);
-    setRefreshKey(prev => prev + 1);
+    setRefreshKey(prev => prev + 1); // Trigger refresh animation
     const newStats = {};
     
     try {
       for (const friend of friends) {
-        const [cfData, lcCount] = await Promise.all([
-          fetchCodeforcesSubmissions(friend.platforms.codeforces),
-          fetchLeetCodeStats(friend.platforms.leetcode)
-        ]);
-        
+        const cfData = await fetchCodeforcesSubmissions(friend.platforms.codeforces);
         const cfSubmissions = cfData.result || [];
+        
         const today = new Date().setHours(0, 0, 0, 0);
         
         const cfDailyCount = cfSubmissions.filter(sub => 
@@ -156,9 +65,7 @@ const CodingTracker = () => {
         ).length;
 
         newStats[friend.id] = {
-          codeforcesCount: cfDailyCount,
-          leetcodeCount: lcCount,
-          totalToday: cfDailyCount + lcCount
+          totalToday: cfDailyCount
         };
       }
       
@@ -181,7 +88,7 @@ const CodingTracker = () => {
       fetchStats();
     }
     
-    const interval = setInterval(fetchStats, 60000);
+    const interval = setInterval(fetchStats, 60000); // Update every minute
     return () => clearInterval(interval);
   }, [friends]);
 
@@ -225,42 +132,27 @@ const CodingTracker = () => {
                 onChange={(e) => setNewFriend({...newFriend, name: e.target.value})}
                 className="px-4 py-3 border border-indigo-200 rounded-lg flex-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white"
               />
-              <div className="flex-1">
-                <input
-                  placeholder="Codeforces Username"
-                  value={newFriend.platforms.codeforces}
-                  onChange={(e) => setNewFriend({
-                    ...newFriend,
-                    platforms: {...newFriend.platforms, codeforces: e.target.value}
-                  })}
-                  className={`px-4 py-3 border rounded-lg w-full focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white ${
-                    validationErrors.codeforces ? 'border-red-300' : 'border-indigo-200'
-                  }`}
-                />
-                {validationErrors.codeforces && (
-                  <p className="mt-1 text-sm text-red-600">{validationErrors.codeforces}</p>
-                )}
-              </div>
-              <div className="flex-1">
-                <input
-                  placeholder="LeetCode Username"
-                  value={newFriend.platforms.leetcode}
-                  onChange={(e) => setNewFriend({
-                    ...newFriend,
-                    platforms: {...newFriend.platforms, leetcode: e.target.value}
-                  })}
-                  className={`px-4 py-3 border rounded-lg w-full focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white ${
-                    validationErrors.leetcode ? 'border-red-300' : 'border-indigo-200'
-                  }`}
-                />
-                {validationErrors.leetcode && (
-                  <p className="mt-1 text-sm text-red-600">{validationErrors.leetcode}</p>
-                )}
-              </div>
+              <input
+                placeholder="Codeforces Username"
+                value={newFriend.platforms.codeforces}
+                onChange={(e) => setNewFriend({
+                  ...newFriend,
+                  platforms: {...newFriend.platforms, codeforces: e.target.value}
+                })}
+                className="px-4 py-3 border border-indigo-200 rounded-lg flex-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white"
+              />
+              <input
+                placeholder="LeetCode Username"
+                value={newFriend.platforms.leetcode}
+                onChange={(e) => setNewFriend({
+                  ...newFriend,
+                  platforms: {...newFriend.platforms, leetcode: e.target.value}
+                })}
+                className="px-4 py-3 border border-indigo-200 rounded-lg flex-1 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all duration-200 bg-white"
+              />
               <button 
                 onClick={handleAddFriend} 
-                className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md disabled:opacity-50"
-                disabled={isLoading}
+                className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all duration-300 transform hover:scale-105 active:scale-95 shadow-md"
               >
                 <PlusCircle className="w-5 h-5" />
                 Add Friend
@@ -279,9 +171,7 @@ const CodingTracker = () => {
                 <tr>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-indigo-900">Champion</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-indigo-900">Platforms</th>
-                  <th className="px-6 py-4 text-center text-sm font-semibold text-indigo-900">CF Problems</th>
-                  <th className="px-6 py-4 text-center text-sm font-semibold text-indigo-900">LC Problems</th>
-                  <th className="px-6 py-4 text-center text-sm font-semibold text-indigo-900">Total Today</th>
+                  <th className="px-6 py-4 text-center text-sm font-semibold text-indigo-900">Today's Solved</th>
                   <th className="px-6 py-4 text-right text-sm font-semibold text-indigo-900">Actions</th>
                 </tr>
               </thead>
@@ -305,35 +195,9 @@ const CodingTracker = () => {
                     </td>
                     <td className="px-6 py-4 text-sm">
                       <div className="space-y-1">
-                        <a
-                          href={`https://codeforces.com/profile/${friend.platforms.codeforces}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 transition-colors"
-                        >
-                          CF: {friend.platforms.codeforces}
-                          <ExternalLink className="w-4 h-4" />
-                        </a>
-                        <a
-                          href={`https://leetcode.com/${friend.platforms.leetcode}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-purple-600 hover:text-purple-800 transition-colors"
-                        >
-                          LC: {friend.platforms.leetcode}
-                          <ExternalLink className="w-4 h-4" />
-                        </a>
+                        <div className="text-indigo-600">CF: {friend.platforms.codeforces}</div>
+                        <div className="text-purple-600">LC: {friend.platforms.leetcode}</div>
                       </div>
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-indigo-100 text-indigo-700">
-                        {stats[friend.id]?.codeforcesCount || 0}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-center">
-<span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-purple-100 text-purple-700">
-                        {stats[friend.id]?.leetcodeCount || 0}
-                      </span>
                     </td>
                     <td className="px-6 py-4 text-center">
                       <span className={`inline-flex items-center justify-center w-10 h-10 rounded-full ${
@@ -365,3 +229,4 @@ const CodingTracker = () => {
 };
 
 export default CodingTracker;
+
